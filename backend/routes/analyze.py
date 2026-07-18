@@ -1,84 +1,43 @@
 from fastapi import APIRouter, HTTPException
 
-from models.request import VideoRequest
-
-from utils.youtube_utils import extract_video_id
-
+from backend.models.schemas import AnalyzeRequest
 from services.youtube_service import (
+    extract_video_id,
+    fetch_video_details,
     fetch_comments,
-    fetch_video_details
 )
-
-from services.preprocessing_service import clean_text
-
-from services.sentiment_service import predict
-
-from services.analytics_service import top_keywords
+from services.sentiment_service import analyze_comments
+from services.analytics_service import generate_summary
 
 router = APIRouter()
 
 
 @router.post("/analyze")
-def analyze(request: VideoRequest):
-
-    video_id = extract_video_id(request.url)
+def analyze(request: AnalyzeRequest):
+    video_id = extract_video_id(request.video_url)
 
     if not video_id:
-
         raise HTTPException(
             status_code=400,
-            detail="Invalid URL"
+            detail="Invalid YouTube URL"
         )
 
     video = fetch_video_details(video_id)
 
-    comments = fetch_comments(
-        video_id,
-        request.max_comments
-    )
+    if video is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Video not found"
+        )
 
-    summary = {
+    comments = fetch_comments(video_id) or []
 
-        "Positive": 0,
-        "Negative": 0,
-        "Neutral": 0
+    analyzed_comments = analyze_comments(comments)
 
-    }
-
-    processed = []
-
-    cleaned_comments = []
-
-    for comment in comments:
-
-        cleaned = clean_text(comment["comment"])
-
-        sentiment, score = predict(cleaned)
-
-        summary[sentiment] += 1
-
-        cleaned_comments.append(cleaned)
-
-        processed.append({
-
-            **comment,
-
-            "cleaned": cleaned,
-
-            "sentiment": sentiment,
-
-            "score": score
-
-        })
+    summary = generate_summary(analyzed_comments)
 
     return {
-
         "video": video,
-
         "summary": summary,
-
-        "keywords": top_keywords(cleaned_comments),
-
-        "comments": processed
-
+        "comments": analyzed_comments
     }
